@@ -4,6 +4,8 @@
 
 /* ------------------- ZIP archive reading/writing */
 
+#ifndef MINIZ_NO_ARCHIVE_APIS
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -79,29 +81,26 @@ typedef mz_bool (*mz_file_needs_keepalive)(void *pOpaque);
 struct mz_zip_internal_state_tag;
 typedef struct mz_zip_internal_state_tag mz_zip_internal_state;
 
-typedef enum
-{
+typedef enum {
     MZ_ZIP_MODE_INVALID = 0,
     MZ_ZIP_MODE_READING = 1,
     MZ_ZIP_MODE_WRITING = 2,
     MZ_ZIP_MODE_WRITING_HAS_BEEN_FINALIZED = 3
 } mz_zip_mode;
 
-typedef enum
-{
+typedef enum {
     MZ_ZIP_FLAG_CASE_SENSITIVE = 0x0100,
     MZ_ZIP_FLAG_IGNORE_PATH = 0x0200,
     MZ_ZIP_FLAG_COMPRESSED_DATA = 0x0400,
     MZ_ZIP_FLAG_DO_NOT_SORT_CENTRAL_DIRECTORY = 0x0800,
     MZ_ZIP_FLAG_VALIDATE_LOCATE_FILE_FLAG = 0x1000, /* if enabled, mz_zip_reader_locate_file() will be called on each file as its validated to ensure the func finds the file in the central dir (intended for testing) */
     MZ_ZIP_FLAG_VALIDATE_HEADERS_ONLY = 0x2000,     /* validate the local headers, but don't decompress the entire file and check the crc32 */
-    MZ_ZIP_FLAG_WRITE_ZIP64 = 0x4000,               /* use the zip64 file format, instead of the original zip file format */
+    MZ_ZIP_FLAG_WRITE_ZIP64 = 0x4000,               /* always use the zip64 file format, instead of the original zip file format with automatic switch to zip64. Use as flags parameter with mz_zip_writer_init*_v2 */
     MZ_ZIP_FLAG_WRITE_ALLOW_READING = 0x8000,
-    MZ_ZIP_FLAG_UTF8_FILENAME = 0x10000
+    MZ_ZIP_FLAG_ASCII_FILENAME = 0x10000
 } mz_zip_flags;
 
-typedef enum
-{
+typedef enum {
     MZ_ZIP_TYPE_INVALID = 0,
     MZ_ZIP_TYPE_USER,
     MZ_ZIP_TYPE_MEMORY,
@@ -112,8 +111,7 @@ typedef enum
 } mz_zip_type;
 
 /* miniz error codes. Be sure to update mz_zip_get_error_string() if you add or modify this enum. */
-typedef enum
-{
+typedef enum {
     MZ_ZIP_NO_ERROR = 0,
     MZ_ZIP_UNDEFINED_ERROR,
     MZ_ZIP_TOO_MANY_FILES,
@@ -169,12 +167,32 @@ typedef struct
 
     mz_file_read_func m_pRead;
     mz_file_write_func m_pWrite;
-	mz_file_needs_keepalive m_pNeeds_keepalive;
+    mz_file_needs_keepalive m_pNeeds_keepalive;
     void *m_pIO_opaque;
 
     mz_zip_internal_state *m_pState;
 
 } mz_zip_archive;
+
+typedef struct
+{
+    mz_zip_archive *pZip;
+    mz_uint flags;
+
+    int status;
+#ifndef MINIZ_DISABLE_ZIP_READER_CRC32_CHECKS
+    mz_uint file_crc32;
+#endif
+    mz_uint64 read_buf_size, read_buf_ofs, read_buf_avail, comp_remaining, out_buf_ofs, cur_file_ofs;
+    mz_zip_archive_file_stat file_stat;
+    void *pRead_buf;
+    void *pWrite_buf;
+
+    size_t out_blk_remain;
+
+    tinfl_decompressor inflator;
+
+} mz_zip_reader_extract_iter_state;
 
 /* -------- ZIP reading */
 
@@ -283,6 +301,12 @@ void *mz_zip_reader_extract_file_to_heap(mz_zip_archive *pZip, const char *pFile
 mz_bool mz_zip_reader_extract_to_callback(mz_zip_archive *pZip, mz_uint file_index, mz_file_write_func pCallback, void *pOpaque, mz_uint flags);
 mz_bool mz_zip_reader_extract_file_to_callback(mz_zip_archive *pZip, const char *pFilename, mz_file_write_func pCallback, void *pOpaque, mz_uint flags);
 
+/* Extract a file iteratively */
+mz_zip_reader_extract_iter_state* mz_zip_reader_extract_iter_new(mz_zip_archive *pZip, mz_uint file_index, mz_uint flags);
+mz_zip_reader_extract_iter_state* mz_zip_reader_extract_file_iter_new(mz_zip_archive *pZip, const char *pFilename, mz_uint flags);
+size_t mz_zip_reader_extract_iter_read(mz_zip_reader_extract_iter_state* pState, void* pvBuf, size_t buf_size);
+mz_bool mz_zip_reader_extract_iter_free(mz_zip_reader_extract_iter_state* pState);
+
 #ifndef MINIZ_NO_STDIO
 /* Extracts a archive file to a disk file and sets its last accessed and modified times. */
 /* This function only extracts files, not archive directory records. */
@@ -324,8 +348,11 @@ mz_bool mz_zip_end(mz_zip_archive *pZip);
 #ifndef MINIZ_NO_ARCHIVE_WRITING_APIS
 
 /* Inits a ZIP archive writer. */
+/*Set pZip->m_pWrite (and pZip->m_pIO_opaque) before calling mz_zip_writer_init or mz_zip_writer_init_v2*/
+/*The output is streamable, i.e. file_ofs in mz_file_write_func always increases only by n*/
 mz_bool mz_zip_writer_init(mz_zip_archive *pZip, mz_uint64 existing_size);
 mz_bool mz_zip_writer_init_v2(mz_zip_archive *pZip, mz_uint64 existing_size, mz_uint flags);
+
 mz_bool mz_zip_writer_init_heap(mz_zip_archive *pZip, size_t size_to_reserve_at_beginning, size_t initial_allocation_size);
 mz_bool mz_zip_writer_init_heap_v2(mz_zip_archive *pZip, size_t size_to_reserve_at_beginning, size_t initial_allocation_size, mz_uint flags);
 
@@ -406,3 +433,5 @@ void *mz_zip_extract_archive_file_to_heap_v2(const char *pZip_filename, const ch
 #ifdef __cplusplus
 }
 #endif
+
+#endif /* MINIZ_NO_ARCHIVE_APIS */
